@@ -1,0 +1,367 @@
+// DOM Elements
+const addItemBtn = document.getElementById('addItemBtn');
+const inventoryForm = document.getElementById('inventoryForm');
+const inventoryList = document.getElementById('inventoryList');
+const searchInput = document.getElementById('searchInput');
+const categoryFilter = document.getElementById('categoryFilter');
+const modal = document.getElementById('itemModal');
+const confirmModal = document.getElementById('confirmModal');
+const closeBtn = document.querySelector('.close');
+const cancelBtn = document.getElementById('cancelBtn');
+const confirmDeleteBtn = document.getElementById('confirmDelete');
+const confirmCancelBtn = document.getElementById('confirmCancel');
+
+// API base URL
+const API_BASE_URL = 'http://localhost:3000/api';
+
+// Global variables
+let inventory = [];
+let currentItemId = null;
+let isEditMode = false;
+
+// Event Listeners
+document.addEventListener('DOMContentLoaded', () => {
+    loadInventory();
+    setupEventListeners();
+});
+
+function setupEventListeners() {
+    // Modal controls
+    if (addItemBtn) addItemBtn.addEventListener('click', () => openModal());
+    if (closeBtn) closeBtn.addEventListener('click', closeModal);
+    if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
+    
+    window.addEventListener('click', (e) => {
+        if (e.target === modal) closeModal();
+    });
+
+    // Form submission
+    if (inventoryForm) {
+        inventoryForm.addEventListener('submit', handleFormSubmit);
+    }
+
+    // Search and filter
+    if (searchInput) searchInput.addEventListener('input', filterInventory);
+    if (categoryFilter) categoryFilter.addEventListener('change', filterInventory);
+
+    // Confirmation modal
+    if (confirmDeleteBtn) confirmDeleteBtn.addEventListener('click', confirmDelete);
+    if (confirmCancelBtn) {
+        confirmCancelBtn.addEventListener('click', () => {
+            confirmModal.style.display = 'none';
+        });
+    }
+}
+
+// Load inventory into the table
+async function loadInventory() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/items`);
+        if (!response.ok) throw new Error('Failed to fetch items');
+        
+        const items = await response.json();
+        inventory = items;
+        renderInventory(items);
+    } catch (error) {
+        console.error('Error loading inventory:', error);
+        showNotification('Failed to load inventory', 'error');
+    }
+}
+
+// Render inventory items
+function renderInventory(items) {
+    if (!inventoryList) return;
+    
+    inventoryList.innerHTML = '';
+    
+    if (items.length === 0) {
+        const emptyRow = document.createElement('tr');
+        emptyRow.innerHTML = `
+            <td colspan="8" style="text-align: center; padding: 20px;">
+                No items found. Click "Add Item" to get started.
+            </td>
+        `;
+        inventoryList.appendChild(emptyRow);
+        return;
+    }
+
+    items.forEach(item => {
+        const row = createTableRow(item);
+        inventoryList.appendChild(row);
+    });
+}
+
+// Filter inventory based on search and category
+async function filterInventory() {
+    const searchTerm = (searchInput?.value || '').toLowerCase();
+    const category = categoryFilter?.value || '';
+    
+    try {
+        const params = new URLSearchParams();
+        if (searchTerm) params.append('search', searchTerm);
+        if (category) params.append('category', category);
+        
+        const response = await fetch(`${API_BASE_URL}/items?${params.toString()}`);
+        if (!response.ok) throw new Error('Failed to filter items');
+        
+        const filteredItems = await response.json();
+        renderInventory(filteredItems);
+    } catch (error) {
+        console.error('Error filtering items:', error);
+        showNotification('Failed to filter items', 'error');
+    }
+}
+
+// Create a table row for an item
+function createTableRow(item) {
+    const row = document.createElement('tr');
+    row.setAttribute('data-id', item.id);
+    
+    // Determine stock status
+    let statusClass = 'status-in-stock';
+    if (item.quantity <= 0) {
+        statusClass = 'status-out-of-stock';
+    } else if (item.quantity <= 5) {
+        statusClass = 'status-low-stock';
+    }
+    
+    row.innerHTML = `
+        <td>${item.productName || 'N/A'}</td>
+        <td>${item.sku || 'N/A'}</td>
+        <td>${item.category || 'N/A'}</td>
+        <td><span class="status-badge ${statusClass}">${item.quantity}</span></td>
+        <td>$${item.price ? item.price.toFixed(2) : '0.00'}</td>
+        <td>${item.supplier || 'N/A'}</td>
+        <td>${item.location || 'N/A'}</td>
+        <td class="actions">
+            <button class="btn btn-edit" onclick="editItem(${item.id})">
+                <i class="fas fa-edit"></i> Edit
+            </button>
+            <button class="btn btn-delete" onclick="deleteItem(${item.id})">
+                <i class="fas fa-trash-alt"></i> Delete
+            </button>
+        </td>
+    `;
+    
+    return row;
+}
+
+// Open modal for adding/editing items
+async function openModal(itemId = null) {
+    if (!modal) return;
+    
+    const modalTitle = document.getElementById('modalTitle');
+    const form = document.getElementById('inventoryForm');
+    
+    if (itemId) {
+        // Edit mode
+        isEditMode = true;
+        currentItemId = itemId;
+        modalTitle.textContent = 'Edit Item';
+        
+        try {
+            const response = await fetch(`${API_BASE_URL}/items/${itemId}`);
+            if (!response.ok) throw new Error('Failed to fetch item details');
+            
+            const item = await response.json();
+            
+            // Populate form fields
+            document.getElementById('productName').value = item.productName || '';
+            document.getElementById('sku').value = item.sku || '';
+            document.getElementById('category').value = item.category || '';
+            document.getElementById('quantity').value = item.quantity || 0;
+            document.getElementById('price').value = item.price || 0;
+            document.getElementById('supplier').value = item.supplier || '';
+            document.getElementById('location').value = item.location || '';
+        } catch (error) {
+            console.error('Error fetching item:', error);
+            showNotification('Failed to load item details', 'error');
+            closeModal();
+            return;
+        }
+    } else {
+        // Add mode
+        isEditMode = false;
+        currentItemId = null;
+        modalTitle.textContent = 'Add New Item';
+        if (form) form.reset();
+    }
+    
+    modal.style.display = 'flex';
+}
+
+// Close modal
+function closeModal() {
+    if (!modal) return;
+    modal.style.display = 'none';
+    const form = document.getElementById('inventoryForm');
+    if (form) form.reset();
+    currentItemId = null;
+    isEditMode = false;
+}
+
+// Handle form submission
+async function handleFormSubmit(e) {
+    e.preventDefault();
+    
+    const formData = {
+        productName: document.getElementById('productName')?.value.trim() || '',
+        sku: document.getElementById('sku')?.value.trim() || '',
+        category: document.getElementById('category')?.value || '',
+        quantity: parseInt(document.getElementById('quantity')?.value || '0', 10),
+        price: parseFloat(document.getElementById('price')?.value || '0'),
+        supplier: document.getElementById('supplier')?.value.trim() || null,
+        location: document.getElementById('location')?.value.trim() || null
+    };
+    
+    // Validation
+    if (!formData.productName || !formData.sku || isNaN(formData.quantity) || isNaN(formData.price)) {
+        showNotification('Please fill in all required fields with valid values', 'error');
+        return;
+    }
+    
+    try {
+        let response;
+        
+        if (isEditMode && currentItemId) {
+            // Update existing item
+            response = await fetch(`${API_BASE_URL}/items/${currentItemId}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(formData)
+            });
+            
+            if (!response.ok) throw new Error('Failed to update item');
+            showNotification('Item updated successfully!', 'success');
+        } else {
+            // Add new item
+            response = await fetch(`${API_BASE_URL}/items`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(formData)
+            });
+            
+            if (!response.ok) throw new Error('Failed to add item');
+            showNotification('Item added successfully!', 'success');
+        }
+        
+        // Refresh the inventory
+        await loadInventory();
+        closeModal();
+    } catch (error) {
+        console.error('Error saving item:', error);
+        showNotification(error.message || 'Failed to save item', 'error');
+    }
+}
+
+// Delete item with confirmation
+function deleteItem(id) {
+    if (!confirmModal) return;
+    currentItemId = id;
+    confirmModal.style.display = 'flex';
+}
+
+// Confirm delete action
+async function confirmDelete() {
+    if (!currentItemId || !confirmModal) return;
+    
+    try {
+        const response = await fetch(`${API_BASE_URL}/items/${currentItemId}`, {
+            method: 'DELETE'
+        });
+        
+        if (!response.ok) throw new Error('Failed to delete item');
+        
+        showNotification('Item deleted successfully!', 'success');
+        await loadInventory();
+    } catch (error) {
+        console.error('Error deleting item:', error);
+        showNotification(error.message || 'Failed to delete item', 'error');
+    } finally {
+        confirmModal.style.display = 'none';
+        currentItemId = null;
+    }
+}
+
+// Show notification
+function showNotification(message, type = 'info') {
+    // Create notification element if it doesn't exist
+    let notification = document.getElementById('notification');
+    if (!notification) {
+        notification = document.createElement('div');
+        notification.id = 'notification';
+        document.body.appendChild(notification);
+        
+        // Add styles if not already added
+        if (!document.getElementById('notification-styles')) {
+            const style = document.createElement('style');
+            style.id = 'notification-styles';
+            style.textContent = `
+                #notification {
+                    position: fixed;
+                    top: 20px;
+                    right: 20px;
+                    padding: 15px 25px;
+                    border-radius: 4px;
+                    color: white;
+                    font-weight: 500;
+                    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                    z-index: 1000;
+                    opacity: 0;
+                    transform: translateX(120%);
+                    transition: all 0.3s ease-in-out;
+                }
+                
+                #notification.show {
+                    opacity: 1;
+                    transform: translateX(0);
+                }
+                
+                #notification.info {
+                    background-color: #4361ee;
+                }
+                
+                #notification.success {
+                    background-color: #2ecc71;
+                }
+                
+                #notification.error {
+                    background-color: #ef233c;
+                }
+                
+                #notification.warning {
+                    background-color: #f39c12;
+                    color: #000;
+                }
+            `;
+            document.head.appendChild(style);
+        }
+    }
+    
+    // Set notification content and style
+    notification.textContent = message;
+    notification.className = `notification ${type}`;
+    notification.style.display = 'block';
+    
+    // Trigger reflow to ensure the transition works
+    void notification.offsetWidth;
+    
+    // Add show class
+    notification.classList.add('show');
+    
+    // Auto-hide after 3 seconds
+    setTimeout(() => {
+        notification.classList.remove('show');
+        setTimeout(() => {
+            notification.style.display = 'none';
+        }, 300);
+    }, 3000);
+}
+
+// Make functions available globally for inline event handlers
+window.editItem = editItem;
+window.deleteItem = deleteItem;
